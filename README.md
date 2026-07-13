@@ -138,6 +138,47 @@ Then add a Razorpay webhook for `payment_link.paid` and `payment_link.expired` p
 
 ---
 
+## How to actually test it
+
+Testing this needs **two** actors at once: a driver broadcasting GPS, and a rider watching the map. One phone can only be one of them. So there's a script that plays the driver, and you watch as a parent.
+
+**1. Run the app.** Background GPS, push and MapLibre all need native code, so this is a development build — Expo Go won't do:
+
+```bash
+cd mobile
+npx expo run:android      # or: npx expo run:ios
+```
+
+On Windows, if the build complains about Java, point it at Android Studio's JDK — the `java` on your PATH is probably an old JRE:
+
+```bash
+export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
+```
+
+**2. Sign in as a parent** — `priya@demo.parent` / `password123`.
+You'll see Aarav, and "Not on the bus yet".
+
+**3. Drive the bus** (in another terminal):
+
+```bash
+node scripts/simulate-trip.mjs
+```
+
+It signs in as the seeded driver and calls the same `ingest_location` RPC the real app calls — no service key, no back door. Everything it does, a real driver's phone could do.
+
+Now watch the app. The bus appears and moves. As it reaches each stop you get **"Bus arriving soon"**, then **"Aarav boarded"**, then **"Reached school"** — the whole parent journey, live.
+
+```bash
+node scripts/simulate-trip.mjs --minutes 8        # slower, more realistic
+node scripts/simulate-trip.mjs --direction outbound   # the evening run home
+node scripts/simulate-trip.mjs --no-board         # don't mark anyone aboard
+```
+
+**4. Reset between runs** — paste [`scripts/reset-demo.sql`](scripts/reset-demo.sql) into the SQL Editor. It clears the trip data and puts the buses back to `scheduled`, leaving all the seed reference data alone.
+
+**Try the other roles too.** Sign in as `suresh@demo.parent` and you'll see *two* children — and notice he gets one "bus arriving" alert but two separate "boarded" messages, which is the correct distinction. Sign in as `ramesh@demo.school` to be the driver and tap the manifest yourself.
+
 ## Demo logins
 
 After running the seed. Password for all: `password123`
