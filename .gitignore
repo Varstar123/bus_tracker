@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Env — never commit. .env.example is the template.
+.env
+.env.local
+.env.*.local
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Native build output (managed workflow regenerates these)
+/mobile/ios/
+/mobile/android/
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+*.swp

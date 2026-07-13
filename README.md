@@ -1,0 +1,188 @@
+# BusTracker
+
+Real-time school/college bus tracking for **students, faculty, parents, drivers and the transport office** — one Expo app, one Postgres database.
+
+Built to the Group 17 *Zeroth Review* spec: live GPS tracking, smart arrival & delay alerts, route-change and accident notifications, an emergency SOS for passengers, and bus-fee payments.
+
+---
+
+## What each person gets
+
+| Role | Sees |
+|---|---|
+| **Student / Faculty** | Live map of their bus, ETA to *their* stop, emergency SOS, their fees |
+| **Parent** | Each child's status (boarded → at school → dropped), live map, alerts, fee payment |
+| **Driver** | Start/end trip, background GPS sharing, boarding manifest, incident reporting |
+| **Transport office** | Live fleet, open incidents, acknowledge/resolve |
+
+## Feature map
+
+Every feature from the deck, and where it actually lives:
+
+| Deck feature | Implementation |
+|---|---|
+| Real-time GPS tracking | `mobile/src/lib/tracking.ts` → `ingest_locations()` → `bus_live` → Realtime |
+| Live map + ETA | `mobile/src/components/BusMap.tsx`, `app.estimate_eta_seconds()` |
+| Smart alert: arriving soon | `app.fire_stop_alerts()` — fires once at ETA ≤ 5 min |
+| Smart alert: delay | `app.fire_stop_alerts()` — fires once at >10 min behind timetable |
+| Student boarding location | Driver manifest → `ride_events` |
+| Parent alerts on home arrival | Geofence → `trip_stop_events` → `app.on_stop_reached()` |
+| Route-change alert | `report_incident(kind => 'route_change')` |
+| Accident notification | `report_incident(kind => 'accident')` — critical priority |
+| Emergency SOS | `raise_sos()` → school office + that child's parents + the driver |
+| Fee payment + confirmation | `fee_invoices` → `create-payment-order` → Razorpay → `razorpay-webhook` |
+
+---
+
+## Architecture
+
+```
+Driver's phone                  Supabase                       Everyone else
+──────────────                  ────────                       ─────────────
+expo-location                   ingest_locations()             Realtime subscription
+background task     ─────────▶  ├─ bus_locations (history)  ─▶ bus_live (1 row/bus)
+(5s, survives                   ├─ geofence → trip_stop_events      │
+ screen-off)                    ├─ ETA → bus_live                   ▼
+      │                         └─ fire_stop_alerts()          live map + ETA
+      │                                    │
+      └─ offline queue                     ▼
+         (AsyncStorage,              notifications ──▶ send-push ──▶ Expo Push
+          flushed in batch)                                              │
+                                                                         ▼
+                                                                   parent's phone
+```
+
+Three decisions worth knowing:
+
+**Riders are records, not accounts.** A seven-year-old has no phone. So a `rider` may or may not link to a login, and `guardians` links parents to riders. This is what makes the parent feature work without forcing every child to have an account.
+
+**Clients subscribe to `bus_live`, never `bus_locations`.** The latter is the raw GPS firehose — one row every 5 seconds per bus. Publishing it over Realtime would push every fix to every phone. `bus_live` is one upserted row per bus; that is the moving dot.
+
+**Boarding is observed, not inferred.** GPS proves the *bus* reached the stop. It cannot prove a *child* walked onto it. So the driver taps the manifest, and that tap is what notifies the parent. Everything else in the app is derived; this one thing is witnessed, and it is why the parent alerts can be trusted.
+
+---
+
+## Setup
+
+### 1. Supabase project
+
+Create one at [supabase.com](https://supabase.com), then:
+
+```bash
+npm i -g supabase
+supabase link --project-ref <your-project-ref>
+supabase db push          # applies migrations/
+```
+
+Then run `supabase/seed.sql` in the SQL Editor to get a demo school.
+*(You do not need Docker for any of this — it all runs against the hosted project.)*
+
+### 2. Mobile env
+
+```bash
+cd mobile
+cp .env.example .env
+```
+
+Fill in `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (Settings → API).
+The anon key is safe to ship — RLS is what protects the data, not the key.
+
+For Android maps you also need `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY` (Google Cloud → *Maps SDK for Android*). Without it the map renders as a blank grey grid. iOS uses Apple Maps and needs no key.
+
+### 3. Run it
+
+**Background GPS and push notifications do not work in Expo Go.** You need a development build:
+
+```bash
+npx expo install expo-dev-client   # already in package.json
+npx eas build --profile development --platform android
+# then
+npm start
+```
+
+Expo Go is fine for looking at the UI, but the driver's location will stop the moment the screen turns off.
+
+### 4. Edge functions
+
+```bash
+supabase secrets set WEBHOOK_SECRET=$(openssl rand -hex 32)
+supabase functions deploy send-push
+supabase functions deploy create-payment-order
+supabase functions deploy razorpay-webhook --no-verify-jwt
+```
+
+Then in the Supabase dashboard: **Database → Webhooks → Create**
+- Table `public.notifications`, event `INSERT`
+- Type: Edge Function → `send-push`
+- HTTP header: `x-webhook-secret: <the same value you just set>`
+
+### 5. Payments
+
+To demo without a merchant account:
+
+```bash
+supabase secrets set PAYMENTS_MODE=mock
+```
+
+Invoices settle instantly and no money moves. **Never set this in production** — anyone could clear their own fees. The function refuses to start in mock mode if Razorpay keys are also present.
+
+For real payments:
+
+```bash
+supabase secrets set PAYMENTS_MODE=razorpay \
+  RAZORPAY_KEY_ID=rzp_test_xxx \
+  RAZORPAY_KEY_SECRET=xxx \
+  RAZORPAY_WEBHOOK_SECRET=xxx
+```
+
+Then add a Razorpay webhook for `payment_link.paid` and `payment_link.expired` pointing at `razorpay-webhook`.
+
+---
+
+## Demo logins
+
+After running the seed. Password for all: `password123`
+
+| Email | Role |
+|---|---|
+| `admin@demo.school` | Transport office |
+| `ramesh@demo.school` | Driver — Route 4 |
+| `priya@demo.parent` | Parent of Aarav (Grade 5-B) |
+| `suresh@demo.parent` | Parent of **two** children — Diya and Kabir |
+| `meera@demo.college` | College student |
+| `anand@demo.school` | Faculty |
+
+Sign in as Ramesh, press **Start trip**, and drive (or use the simulator's location tools) — the bus appears live for everyone else.
+
+---
+
+## Security model
+
+- **RLS on every table.** A parent's query for `riders` returns their children and nothing else. This is enforced in the database, not the app, so it holds even if someone hits the API directly with the anon key.
+- **Roles are not self-assigned.** Signing up doesn't grant anything. The school uploads an `invites` roster; signing up *claims* a pre-authorised seat. An email with no invite gets an account with no profile — and every policy keys off the profile, so they can read precisely nothing.
+- **Drivers write telemetry only through RPCs** that verify `driver_id = auth.uid()` and that the trip is actually running. There is no INSERT policy on `trips` or `bus_live` for anyone.
+- **The client never states a price.** It names an invoice; the server looks up what that invoice costs. Razorpay's HMAC-signed webhook — not the app — is what marks a fee paid.
+
+## Known limits
+
+Worth being straight about:
+
+- **"Arrived home" means "dropped at their stop."** Without a device on the child we cannot know they walked through the front door. The app says *"Dropped at Domlur Bridge, 4:12 PM"*, which is true, rather than *"reached home safely"*, which we cannot verify. The wording throughout is deliberate.
+- **The ETA is a straight-line estimate** (great-circle distance × 1.35 detour factor ÷ speed). Good to roughly ±3 minutes in city traffic. `app.estimate_eta_seconds()` is a single function — swap its body for a Directions API call and nothing else changes.
+- **The admin surface is deliberately thin.** Managing routes, rosters and fees belongs in a web console, not on a phone. What's here is what genuinely needs answering from a phone: *is a bus in trouble right now.*
+- **`bus_locations` grows fast** — about 7k rows per bus per day at a 5-second ping. Partition it by month or prune it on a schedule before this goes anywhere near a real fleet.
+
+## Layout
+
+```
+supabase/
+  migrations/     0001 schema · 0003 geofence+ETA+RPCs · 0004 RLS
+                  0006 roster onboarding · 0007 safety · 0008 fees
+  functions/      send-push · create-payment-order · razorpay-webhook
+  seed.sql        one school, one route, 5 riders, 2 parents
+mobile/
+  src/lib/        supabase · auth · tracking (background GPS) · push
+  src/hooks/      useLiveRoute · useRideEvents · useData
+  src/screens/    RiderHome · DriverHome · ParentHome · AdminHome
+  src/app/        expo-router routes; (app)/ is the role-aware tab layout
+```

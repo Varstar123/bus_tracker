@@ -1,0 +1,46 @@
+project_id = "bustracker"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+# `app` is deliberately absent. Those are the SECURITY DEFINER internals that RLS
+# is built on top of; exposing them over PostgREST would hand a client the very
+# helpers the policies use to decide what it may see.
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[realtime]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "bustracker://"
+additional_redirect_urls = ["bustracker://"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# The roster is the gate, not the inbox. A signup with no invite gets an account
+# with no profile, and RLS then shows them nothing -- see migration 0006.
+enable_confirmations = false
+
+[functions.send-push]
+# Called by a Database Webhook, which authenticates with a shared secret header
+# rather than a user JWT.
+verify_jwt = false
+
+[functions.create-payment-order]
+# Requires a real signed-in user: it checks who is paying before it bills them.
+verify_jwt = true
+
+[functions.razorpay-webhook]
+# Razorpay is not a Supabase user and sends no bearer token. The HMAC signature
+# on the request body is the authentication, and it is stronger than a JWT here.
+verify_jwt = false
