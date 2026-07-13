@@ -22,7 +22,7 @@ Every feature from the deck, and where it actually lives:
 | Deck feature | Implementation |
 |---|---|
 | Real-time GPS tracking | `mobile/src/lib/tracking.ts` → `ingest_locations()` → `bus_live` → Realtime |
-| Live map + ETA | `mobile/src/components/BusMap.tsx`, `app.estimate_eta_seconds()` |
+| Live map + ETA | `mobile/src/components/BusMap.tsx` (MapLibre + OpenFreeMap), `app.estimate_eta_seconds()` |
 | Smart alert: arriving soon | `app.fire_stop_alerts()` — fires once at ETA ≤ 5 min |
 | Smart alert: delay | `app.fire_stop_alerts()` — fires once at >10 min behind timetable |
 | Student boarding location | Driver manifest → `ride_events` |
@@ -84,10 +84,9 @@ cd mobile
 cp .env.example .env
 ```
 
-Fill in `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (Settings → API).
-The anon key is safe to ship — RLS is what protects the data, not the key.
+Fill in `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (Settings → API Keys). That key is safe to ship — RLS is what protects the data, not the key.
 
-For Android maps you also need `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY` (Google Cloud → *Maps SDK for Android*). Without it the map renders as a blank grey grid. iOS uses Apple Maps and needs no key.
+**There is no map key.** Maps are MapLibre + [OpenFreeMap](https://openfreemap.org), which serves OpenStreetMap vector tiles with no account, no key, and no rate limit. Google's Maps SDK is free for mobile map loads too, but it won't issue a working key without a billing account and a card on file — not a trade worth making to draw a line and a moving dot.
 
 ### 3. Run it
 
@@ -155,6 +154,24 @@ After running the seed. Password for all: `password123`
 Sign in as Ramesh, press **Start trip**, and drive (or use the simulator's location tools) — the bus appears live for everyone else.
 
 ---
+
+## What this costs
+
+Nothing, for a project of this size. Nothing here asks for a credit card.
+
+| Piece | Cost |
+|---|---|
+| Maps — MapLibre + OpenFreeMap | Free. No key, no account, no rate limit. |
+| Supabase | Free tier: 500 MB DB, 50k monthly users, Realtime included |
+| Expo push notifications | Free, unlimited |
+| Android build | Free — `npx expo run:android` builds locally, no EAS quota |
+| Payments (demo) | Free — `PAYMENTS_MODE=mock`, no merchant account |
+| Payments (live) | Razorpay, ~2% per transaction |
+
+Two things that will bite you if you don't know them:
+
+- **Supabase pauses free projects after ~1 week of inactivity.** If you build now and demo in three weeks, it'll be asleep. One click to wake — but don't discover that in front of an audience.
+- **`bus_locations` is what fills the free tier.** ~7k rows per bus per day. Prune or partition it before this sees a real fleet.
 
 ## Security model
 

@@ -1,10 +1,10 @@
 import type { ExpoConfig } from 'expo/config';
 
 /**
- * Config lives in TS rather than app.json so the Google Maps key can come from
- * the environment instead of being committed. On Android react-native-maps will
- * render a blank grey grid without this key -- that is the #1 "my map is broken"
- * cause. iOS uses Apple Maps and needs no key.
+ * Maps are MapLibre + OpenFreeMap (OpenStreetMap vector tiles). There is
+ * deliberately no map API key anywhere in this file: Google's Maps SDK will not
+ * issue a working key without a billing account and a card, which is a poor
+ * trade for a project that only ever draws a line and a moving dot.
  */
 const config: ExpoConfig = {
   name: 'BusTracker',
@@ -40,16 +40,12 @@ const config: ExpoConfig = {
       'FOREGROUND_SERVICE',
       'FOREGROUND_SERVICE_LOCATION',
     ],
-    config: {
-      googleMaps: {
-        apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY ?? '',
-      },
-    },
   },
 
   plugins: [
     'expo-router',
     'expo-secure-store',
+    '@maplibre/maplibre-react-native',
     [
       'expo-splash-screen',
       {
