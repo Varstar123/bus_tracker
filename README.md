@@ -149,11 +149,26 @@ cd mobile
 npx expo run:android      # or: npx expo run:ios
 ```
 
-On Windows, if the build complains about Java, point it at Android Studio's JDK — the `java` on your PATH is probably an old JRE:
+**It must be JDK 17. Not 21, not 8.** Expo's Gradle plugin pins its toolchain to `languageVersion=17`, and Gradle toolchains match the *exact* version — so Android Studio's bundled JDK 21 will **not** substitute, and you get:
+
+```
+Cannot find a Java installation on your machine matching: {languageVersion=17, ...}
+```
+
+If you don't have 17, this installs one without needing admin rights:
 
 ```bash
-export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
-export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
+mkdir -p ~/.jdks && cd ~/.jdks
+curl -sSL -o t17.zip "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk"
+powershell -Command "Expand-Archive t17.zip ." && rm t17.zip && mv jdk-17* temurin-17
+```
+
+Then point the build at it:
+
+```bash
+export JAVA_HOME="$HOME/.jdks/temurin-17"       # macOS/Linux: your JDK 17 path
+export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk" # macOS: ~/Library/Android/sdk
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 ```
 
 **2. Sign in as a parent** — `priya@demo.parent` / `password123`.
