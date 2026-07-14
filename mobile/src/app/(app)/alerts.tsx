@@ -1,7 +1,8 @@
 import { RefreshControl, View } from 'react-native';
 
 import { Body, Card, Empty, Loading, Pill, Row, Screen, Title } from '@/components/ui';
-import { formatDay, formatTime, useNotifications } from '@/hooks/useData';
+import { formatDay, formatTime } from '@/hooks/useData';
+import { useNotifications } from '@/lib/notifications';
 import type { Severity } from '@/lib/types';
 import { spacing, useTheme } from '@/theme';
 

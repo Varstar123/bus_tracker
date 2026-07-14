@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
 import { Loading } from '@/components/ui';
-import { useNotifications } from '@/hooks/useData';
+import { useNotifications } from '@/lib/notifications';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/theme';
 

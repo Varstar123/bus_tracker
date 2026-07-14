@@ -318,6 +318,8 @@ export type Database = {
       };
       start_trip: { Args: { p_trip_id: string }; Returns: Trip };
       end_trip: { Args: { p_trip_id: string }; Returns: Trip };
+      /** Creates today's scheduled trips from the routes. Idempotent. */
+      ensure_todays_trips: { Args: Record<string, never>; Returns: number };
       report_incident: {
         Args: {
           p_trip_id: string;

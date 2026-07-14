@@ -32,6 +32,13 @@ export function DriverHome() {
   const load = useCallback(async () => {
     if (!profile) return;
 
+    // Nothing else creates a day's trips, so the driver's app brings them into
+    // being when it loads. Idempotent -- a unique index on
+    // (route_id, service_date, direction) means calling it twice is a no-op.
+    // Without this the app works on the day you seed it and is dead by midnight.
+    const { error: ensureError } = await supabase.rpc('ensure_todays_trips');
+    if (ensureError) console.warn('[trips] could not ensure today:', ensureError.message);
+
     const today = new Date().toISOString().slice(0, 10);
 
     const { data: tripRows } = await supabase

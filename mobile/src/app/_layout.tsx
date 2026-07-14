@@ -6,6 +6,7 @@ import { useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { NotificationsProvider } from '@/lib/notifications';
 import { registerForPush } from '@/lib/push';
 // Side-effect import, and it must stay at the top level of the app entry.
 // TaskManager.defineTask has to have run before Android hands us a background
@@ -73,7 +74,11 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthProvider>
-          <RootNavigator />
+          {/* Above the navigator on purpose: if the tab layout owned this state,
+              its setState would re-render <Tabs> mid-transition and crash Fabric. */}
+          <NotificationsProvider>
+            <RootNavigator />
+          </NotificationsProvider>
         </AuthProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

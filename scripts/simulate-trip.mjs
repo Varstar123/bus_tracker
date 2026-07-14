@@ -93,7 +93,19 @@ async function api(path, opts = {}) {
     return text;
   }
 }
-const rpc = (fn, body) => api(`rpc/${fn}`, { method: 'POST', body: JSON.stringify(body) });
+/**
+ * Every RPC here can fail for a reason you need to see -- the trip is not yours,
+ * the trip is not active, another trip is already running on this bus. Swallowing
+ * that leaves the bus silently frozen on the map with no clue why, which is
+ * exactly what happened the first time this script ran.
+ */
+async function rpc(fn, body) {
+  const res = await api(`rpc/${fn}`, { method: 'POST', body: JSON.stringify(body) });
+  if (res && typeof res === 'object' && !Array.isArray(res) && res.code && res.message) {
+    throw new Error(`${fn} failed [${res.code}]: ${res.message}`);
+  }
+  return res;
+}
 
 // ---------------------------------------------------------------------------
 // Geometry
@@ -130,16 +142,19 @@ async function main() {
   console.log(`Signing in as ${DRIVER_EMAIL}…`);
   token = await signIn(DRIVER_EMAIL, PASSWORD);
 
+  // Same call the driver's app makes on load: bring today's trips into being if
+  // they do not exist yet. Idempotent, so running this script twice is fine.
+  await rpc('ensure_todays_trips', {});
+
+  const today = new Date().toISOString().slice(0, 10);
   const [trip] = await api(
-    `trips?select=id,route_id,status,direction&direction=eq.${DIRECTION}&service_date=eq.${new Date()
-      .toISOString()
-      .slice(0, 10)}`,
+    `trips?select=id,route_id,status,direction&direction=eq.${DIRECTION}&service_date=eq.${today}`,
   );
 
   if (!trip) {
     console.error(
-      `No ${DIRECTION} trip scheduled for today.\n` +
-        `Trips are seeded for the day the seed ran — re-run supabase/seed.sql, or insert one.`,
+      `No ${DIRECTION} trip for ${today}.\n` +
+        `That usually means the route has no bus or no driver assigned.`,
     );
     process.exit(1);
   }
@@ -147,6 +162,17 @@ async function main() {
   if (trip.status === 'completed') {
     console.error(`Today's ${DIRECTION} trip is already completed. Run scripts/reset-demo.sql first.`);
     process.exit(1);
+  }
+
+  // A bus can only be on one trip at a time -- there is a unique index enforcing
+  // it, precisely so a forgotten trip cannot split the GPS stream in two. If an
+  // earlier run left one open, close it, which is what the driver would do.
+  const stale = await api(
+    `trips?select=id,direction&status=eq.active&id=neq.${trip.id}`,
+  );
+  for (const s of stale) {
+    console.log(`Closing a still-running ${s.direction} trip from an earlier run…`);
+    await rpc('end_trip', { p_trip_id: s.id });
   }
 
   if (trip.status === 'scheduled') {
@@ -171,6 +197,28 @@ async function main() {
   // Riders, so we can mark them aboard at their stop.
   const riders = await api(`riders?select=id,full_name,pickup_stop_id,drop_stop_id&route_id=eq.${trip.route_id}`);
   const [me] = await api('profiles?select=id,org_id&role=eq.driver');
+
+  // On the evening run everyone gets on at campus, before the bus moves. Do that
+  // now -- without a 'boarded' event the arrival geofence has nobody to report,
+  // and the parent would never be told their child was dropped.
+  if (BOARD && DIRECTION === 'outbound') {
+    const origin = route[0];
+    for (const rider of riders) {
+      await api('ride_events', {
+        method: 'POST',
+        body: JSON.stringify({
+          org_id: me.org_id,
+          rider_id: rider.id,
+          trip_id: trip.id,
+          stop_id: origin.id,
+          event_type: 'boarded',
+          source: 'driver',
+          recorded_by: me.id,
+        }),
+      });
+    }
+    console.log(`Boarded ${riders.length} riders at ${origin.name}.\n`);
+  }
 
   const totalLegs = route.length - 1;
   const tickCount = Math.max(1, Math.round((MINUTES * 60 * 1000) / TICK_MS));
